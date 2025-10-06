@@ -1,5 +1,5 @@
-import React, { useState, useEffect } from 'react';
-import { View, Text, TextInput, ScrollView, TouchableOpacity, StyleSheet } from 'react-native';
+import React, { useState, useEffect, useRef } from 'react';
+import { View, Text, TextInput, FlatList, TouchableOpacity, StyleSheet, ActivityIndicator } from 'react-native';
 import { GoogleGenerativeAI } from '@google/genai';
 import MathView from 'react-native-math-view'; // Renderiza LaTeX
 
@@ -9,14 +9,15 @@ Você é o "CalculAI", um professor de matemática especializado em reforço esc
 `;
 
 // Substitua pela sua chave REAL
-const API_KEY = "SUA_CHAVE_GEMINI_AQUI"; 
+const API_KEY = "SUA_CHAVE_GEMINI_AQUI";
+
 const ai = new GoogleGenerativeAI(API_KEY);
 const model = ai.getGenerativeModel({
     model: "gemini-2.5-flash",
     config: {
         systemInstruction: SYSTEM_PROMPT,
         // Limitar respostas longas para agilizar o MVP
-        maxOutputTokens: 512, 
+        maxOutputTokens: 512,
     },
 });
 
@@ -24,11 +25,12 @@ const ChatScreen = () => {
     const [messages, setMessages] = useState([]);
     const [input, setInput] = useState('');
     const [loading, setLoading] = useState(false);
+    const flatListRef = useRef(null);
 
     const sendMessage = async () => {
         if (!input.trim() || loading) return;
 
-        const userMessage = { text: input, isUser: true };
+        const userMessage = { text: input, isUser: true, key: String(Date.now()) }; // Add key for FlatList
         setMessages(prev => [...prev, userMessage]);
         setInput('');
         setLoading(true);
@@ -36,21 +38,22 @@ const ChatScreen = () => {
         try {
             // Chamada à API
             const response = await model.generateContent(input);
-            const aiMessageText = response.text;
-            
+            const aiMessageText = response.text();
+
             // Simplesmente divide a mensagem por $ para identificar blocos de texto vs. LaTeX
             const parts = aiMessageText.split('$');
-            const aiMessage = { 
-                text: aiMessageText, 
-                isUser: false, 
-                parts: parts 
+            const aiMessage = {
+                text: aiMessageText,
+                isUser: false,
+                parts: parts,
+                key: String(Date.now() + 1), // Add key for FlatList
             };
-            
+
             setMessages(prev => [...prev, aiMessage]);
 
         } catch (error) {
             console.error("Erro na API do Gemini:", error);
-            setMessages(prev => [...prev, { text: "Desculpe, houve um erro ao processar sua solicitação.", isUser: false }]);
+            setMessages(prev => [...prev, { text: "Desculpe, houve um erro ao processar sua solicitação.", isUser: false, key: String(Date.now() + 2) }]); // Add key for FlatList
         } finally {
             setLoading(false);
         }
@@ -67,10 +70,10 @@ const ChatScreen = () => {
             if (index % 2 !== 0) {
                 // MathView precisa de um string de LaTeX válido
                 return (
-                    <MathView 
+                    <MathView
                         key={index}
                         config={{ exSize: 15 }}
-                        math={part} 
+                        math={part}
                         style={styles.mathView}
                     />
                 );
@@ -85,13 +88,15 @@ const ChatScreen = () => {
 
     return (
         <View style={styles.container}>
-            <ScrollView style={styles.messageList}>
-                {messages.map((msg, index) => (
-                    <View 
-                        key={index} 
+            <FlatList
+                ref={flatListRef}
+                data={messages}
+                renderItem={({ item: msg }) => (
+                    <View
+                        key={msg.key}
                         style={[
                             styles.messageBubble,
-                            { 
+                            {
                                 alignSelf: msg.isUser ? 'flex-end' : 'flex-start',
                                 backgroundColor: msg.isUser ? '#A1C4FC' : '#EEE', // Azul para usuário
                             },
@@ -99,9 +104,13 @@ const ChatScreen = () => {
                     >
                         {renderMessageContent(msg)}
                     </View>
-                ))}
-            </ScrollView>
-            
+                )}
+                keyExtractor={(item) => item.key}
+                style={styles.messageList}
+                onContentSizeChange={() => flatListRef.current?.scrollToEnd({ animated: true })}
+                onLayout={() => flatListRef.current?.scrollToEnd({ animated: true })}
+            />
+
             <View style={styles.inputContainer}>
                 <TextInput
                     style={styles.input}
@@ -110,8 +119,18 @@ const ChatScreen = () => {
                     placeholder="Pergunte algo de Matemática..."
                     editable={!loading}
                 />
-                <TouchableOpacity onPress={sendMessage} style={styles.sendButton} disabled={!input.trim() || loading}>
-                    <Text style={styles.sendButtonText}>{loading ? '...' : 'Enviar'}</Text>
+                <TouchableOpacity
+                    onPress={sendMessage}
+                    style={styles.sendButton}
+                    disabled={!input.trim() || loading}
+                    accessible={true}
+                    accessibilityLabel="Enviar mensagem"
+                >
+                    {loading ? (
+                        <ActivityIndicator size="small" color="white" />
+                    ) : (
+                        <Text style={styles.sendButtonText}>Enviar</Text>
+                    )}
                 </TouchableOpacity>
             </View>
         </View>
