@@ -9,7 +9,7 @@
     "splash": {
       "image": "./assets/splash.png",
       "resizeMode": "contain",
-      "backgroundColor": "#A1C4FC" 
+      "backgroundColor": "#A1C4FC"
     },
     "assetBundlePatterns": [
       "**/*"
@@ -21,10 +21,16 @@
       "adaptiveIcon": {
         "foregroundImage": "./assets/adaptive-icon.png",
         "backgroundColor": "#A1C4FC"
-      }
+      },
+      "package": "com.anonymous.calculaimathtutor"
     },
     "web": {
       "favicon": "./assets/favicon.png"
+    },
+    "extra": {
+      "eas": {
+        "projectId": "baf61b35-215b-46ae-a007-7450f9ed0963"
+      }
     }
   }
 }

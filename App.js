@@ -36,10 +36,10 @@ export default function App() {
                 headerTitleStyle: { fontWeight: 'bold' },
               }}
             >
-              <Stack.Screen name="Home" component={HomeScreen} options={{ title: 'CalculAI' }} />
-              <Stack.Screen name="Chat" component={ChatScreen} options={{ title: 'Professor IA' }} />
+              <Stack.Screen name="Home" component={HomeScreen} options={{ title: 'calculAI' }} />
+              <Stack.Screen name="Chat" component={ChatScreen} options={{ title: 'ProfessorIA' }} />
               <Stack.Screen name="Planning" component={PlanningScreen} options={{ title: 'Plano de Estudos' }} />
-              <Stack.Screen name="Metrics" component={MetricsScreen} options={{ title: 'Desempenho' }} />
+              <Stack.Screen name="Metrics" component={MetricsScreen} options={{ title: 'Desempenho e Métricas' }} />
             </Stack.Navigator>
           </NavigationContainer>
         </KeyboardAvoidingView>

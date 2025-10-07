@@ -1,4 +1,4 @@
-import React, { useState, useRef } from 'react';
+import React, { useState, useRef, useEffect } from 'react';
 import { 
     StyleSheet, 
     View, 
@@ -11,17 +11,15 @@ import {
     ScrollView,
     Linking
 } from 'react-native';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 
 const sleep = (ms) => new Promise(resolve => setTimeout(resolve, ms));
 
-// --- LÓGICA DA CHAMADA REAL À GEMINI API ---
 const geminiApiCall = async (prompt) => {
-    console.log("Chamando API Gemini com prompt:", prompt);
-
     const apiKey = "AIzaSyBLsSMLqMkX0wXODwsOheMl4jyEooqW2v8";
     const apiUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-05-20:generateContent?key=${apiKey}`; 
 
-    const systemPrompt = "Você é um assistente de planejamento e cronograma de estudos. Sua única função é gerar um plano de estudos detalhado em formato JSON, baseado na requisição do usuário (ex: 'Planeje 5 dias para revisar cálculo', 'Crie um cronograma de 2 semanas para aprender React'). Retorne o JSON diretamente, sem texto explicativo antes ou depois. Use sempre o idioma português.";
+    const systemPrompt = "Você é um assistente de planejamento e cronograma de estudos. Sua função é gerar planos de estudo em JSON. Retorne somente JSON.";
 
     const responseSchema = {
         type: "OBJECT",
@@ -69,17 +67,12 @@ const geminiApiCall = async (prompt) => {
             if (!response.ok) {
                 const status = response.status;
                 let errorBody = await response.text();
-
-                if (status === 403) {
-                    errorBody = "Erro 403: Chave da API Gemini inválida ou ausente.";
-                }
                 throw new Error(`API Error: ${status} - ${errorBody}`);
             }
 
             const result = await response.json();
             const text = result.candidates?.[0]?.content?.parts?.[0]?.text;
             if (!text) throw new Error("Resposta vazia da API Gemini.");
-
             return { text, error: null };
 
         } catch (error) {
@@ -90,27 +83,56 @@ const geminiApiCall = async (prompt) => {
     return { text: null, error: lastError };
 };
 
-
 const PlanningScreen = () => {
     const [messages, setMessages] = useState([
-        { key: 'init', content: 'Olá! Diga-me o que você quer estudar ou planejar (ex: "estudar frações por 5 dias").', isUser: false }
+        { key: 'init', content: 'Olá! Diga-me o que você quer estudar.', isUser: false }
     ]);
     const [currentPlan, setCurrentPlan] = useState(null);
     const [input, setInput] = useState('');
     const [loading, setLoading] = useState(false);
+    const [activePlans, setActivePlans] = useState([]);
     const flatListRef = useRef(null);
 
+    useEffect(() => {
+        loadActivePlans();
+    }, []);
+
     const scrollToBottom = () => {
-        setTimeout(() => {
-            flatListRef.current?.scrollToEnd({ animated: true });
-        }, 50);
+        setTimeout(() => flatListRef.current?.scrollToEnd({ animated: true }), 50);
     };
 
-    const handleScheduling = (plan) => {
-        Alert.alert(
-            "Agendamento de Tarefas",
-            `O plano "${plan.planGoal}" com ${plan.tasks.length} tarefas pode ser adicionado manualmente ao Google Calendar.`
-        );
+    const loadActivePlans = async () => {
+        try {
+            const storedPlans = await AsyncStorage.getItem('@activePlans');
+            setActivePlans(storedPlans ? JSON.parse(storedPlans) : []);
+        } catch (error) {
+            console.error('Erro ao carregar planos ativos:', error);
+        }
+    };
+
+    const saveActivePlans = async (plans) => {
+        setActivePlans(plans);
+        await AsyncStorage.setItem('@activePlans', JSON.stringify(plans));
+    };
+
+    const markPlanCompleted = async (plan) => {
+        try {
+            // Remove dos ativos
+            const remainingPlans = activePlans.filter(p => p.planGoal !== plan.planGoal);
+            await saveActivePlans(remainingPlans);
+
+            // Salva nos planos completados
+            const completedJSON = await AsyncStorage.getItem('@completedPlans');
+            const completedPlans = completedJSON ? JSON.parse(completedJSON) : [];
+            await AsyncStorage.setItem('@completedPlans', JSON.stringify([
+                ...completedPlans,
+                { ...plan, completed: true, completedAt: new Date().toISOString() }
+            ]));
+
+            Alert.alert("Parabéns!", `Plano "${plan.planGoal}" concluído e registrado nas métricas.`);
+        } catch (error) {
+            console.error('Erro ao marcar plano completo:', error);
+        }
     };
 
     const sendMessage = async () => {
@@ -123,30 +145,24 @@ const PlanningScreen = () => {
         setCurrentPlan(null);
         scrollToBottom();
 
-        let aiMessageContent = null;
         try {
             const result = await geminiApiCall(userMessage.text);
-            if (result.text) {
-                let jsonText = result.text;
-                if (jsonText.startsWith('```json')) {
-                    jsonText = jsonText.replace(/```json|```/g, '');
-                }
-                const parsedPlan = JSON.parse(jsonText);
-                setCurrentPlan(parsedPlan);
-                return;
-            } else if (result.error) {
-                throw new Error(result.error.message);
-            } else {
-                aiMessageContent = "Resposta vazia da API.";
+            let jsonText = result.text;
+            if (jsonText.startsWith('```json')) {
+                jsonText = jsonText.replace(/```json|```/g, '');
             }
+            const parsedPlan = JSON.parse(jsonText);
+
+            // Salvar no histórico de planos ativos
+            const newActivePlans = [...activePlans, parsedPlan];
+            await saveActivePlans(newActivePlans);
+
+            setCurrentPlan(parsedPlan);
+
         } catch (error) {
-            aiMessageContent = `Erro ao gerar plano: ${error.message}`;
+            setMessages(prev => [...prev, { content: `Erro: ${error.message}`, isUser: false, key: String(Date.now() + 1) }]);
         } finally {
             setLoading(false);
-            if (aiMessageContent) {
-                setMessages(prev => [...prev, { content: aiMessageContent, isUser: false, key: String(Date.now() + 1) }]);
-                scrollToBottom();
-            }
         }
     };
 
@@ -165,7 +181,6 @@ const PlanningScreen = () => {
         </View>
     );
 
-    // --- VISUALIZAÇÃO DO PLANO ---
     const renderPlanView = () => {
         if (!currentPlan) return null;
         const plan = currentPlan;
@@ -173,7 +188,6 @@ const PlanningScreen = () => {
         return (
             <ScrollView style={styles.planViewContainer} contentContainerStyle={styles.planContentContainer}>
                 <Text style={styles.mainTitle}>{plan.planGoal}</Text>
-
                 <TouchableOpacity onPress={() => setCurrentPlan(null)} style={styles.backButton}>
                     <Text style={styles.backButtonText}>← Iniciar Novo Plano</Text>
                 </TouchableOpacity>
@@ -193,21 +207,17 @@ const PlanningScreen = () => {
                 <Text style={styles.sectionTitle}>🗓️ Cronograma Detalhado</Text>
                 <View style={styles.scheduleContainer}>
                     {plan.tasks.map((task, index) => {
-                        // --- DATA E HORA REAIS ---
                         const startDate = new Date();
-                        startDate.setDate(startDate.getDate() + index); // +1 dia por tarefa
-
-                        // Extrair horário do task.timeSlot se existir
+                        startDate.setDate(startDate.getDate() + index);
                         let startHour = 20, startMin = 0;
                         const match = task.timeSlot?.match(/(\d{1,2})[:h](\d{2})?/);
                         if (match) {
                             startHour = parseInt(match[1], 10);
                             startMin = parseInt(match[2] || '00', 10);
                         }
-
                         startDate.setHours(startHour, startMin, 0, 0);
                         const endDate = new Date(startDate);
-                        endDate.setHours(startDate.getHours() + 1); // duração de 1h
+                        endDate.setHours(startDate.getHours() + 1);
 
                         const formatDate = (d) =>
                             d.toISOString().replace(/[-:]/g, '').split('.')[0] + 'Z';
@@ -248,12 +258,12 @@ const PlanningScreen = () => {
                 </View>
 
                 <TouchableOpacity
-                    onPress={() => handleScheduling(plan)}
+                    onPress={() => markPlanCompleted(plan)}
                     style={styles.scheduleButtonDetailed}
                     accessible={true}
-                    accessibilityLabel="Agendar todas as tarefas no calendário"
+                    accessibilityLabel="Marcar plano como concluído"
                 >
-                    <Text style={styles.scheduleButtonTextDetailed}>Agendar Todas no Calendário</Text>
+                    <Text style={styles.scheduleButtonTextDetailed}>✅ Marcar como Concluído</Text>
                 </TouchableOpacity>
 
                 <View style={{ height: 40 }} />
@@ -318,25 +328,8 @@ const styles = StyleSheet.create({
     loadingContainer: { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 15, paddingVertical: 5 },
     loadingText: { marginLeft: 8, color: '#666', fontSize: 13 },
     inputContainer: { flexDirection: 'row', padding: 10 },
-    input: {
-        flex: 1,
-        borderWidth: 1,
-        borderColor: '#CCC',
-        borderRadius: 20,
-        paddingHorizontal: 15,
-        paddingVertical: 10,
-        marginRight: 8,
-        backgroundColor: '#FFF',
-        fontSize: 15,
-    },
-    sendButton: {
-        backgroundColor: '#FDD835',
-        borderRadius: 20,
-        paddingHorizontal: 15,
-        paddingVertical: 10,
-        justifyContent: 'center',
-        alignItems: 'center',
-    },
+    input: { flex: 1, borderWidth: 1, borderColor: '#CCC', borderRadius: 20, paddingHorizontal: 15, paddingVertical: 10, marginRight: 8, backgroundColor: '#FFF', fontSize: 15 },
+    sendButton: { backgroundColor: '#FDD835', borderRadius: 20, paddingHorizontal: 15, paddingVertical: 10, justifyContent: 'center', alignItems: 'center' },
     sendButtonDisabled: { backgroundColor: '#CCC' },
     sendButtonText: { color: '#333', fontWeight: 'bold', fontSize: 15 },
     planViewContainer: { flex: 1, backgroundColor: '#FFF' },
@@ -360,14 +353,7 @@ const styles = StyleSheet.create({
     taskActivities: { fontSize: 14, color: '#666', fontStyle: 'italic' },
     calendarLinkButton: { marginTop: 8, paddingVertical: 6 },
     calendarLinkText: { color: '#1A73E8', fontSize: 14, textDecorationLine: 'underline' },
-    scheduleButtonDetailed: {
-        backgroundColor: '#FDD835',
-        padding: 15,
-        borderRadius: 25,
-        marginTop: 25,
-        alignItems: 'center',
-        elevation: 5,
-    },
+    scheduleButtonDetailed: { backgroundColor: '#FDD835', padding: 15, borderRadius: 25, marginTop: 25, alignItems: 'center', elevation: 5 },
     scheduleButtonTextDetailed: { color: '#333', fontWeight: 'bold', fontSize: 16 },
 });
 
