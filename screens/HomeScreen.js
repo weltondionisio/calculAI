@@ -4,7 +4,6 @@ import { View, Text, TouchableOpacity, StyleSheet } from 'react-native';
 const HomeScreen = ({ navigation }) => {
   return (
     <View style={styles.container}>
-      {/* O título da tela agora está no cabeçalho, mas podemos manter um na tela se quisermos */}
       <Text style={styles.welcomeText}>Bem-vindo ao seu tutor de Matemática</Text>
       
       {/* BOTÃO 1: CHAT */}
@@ -37,7 +36,7 @@ const HomeScreen = ({ navigation }) => {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#F5F5F5', // Fundo levemente cinza para contraste
+    backgroundColor: '#F5F5F5',
     alignItems: 'center',
     padding: 20,
     paddingTop: 50,
@@ -55,8 +54,8 @@ const styles = StyleSheet.create({
     borderRadius: 12,
     marginVertical: 10,
     alignItems: 'center',
-    elevation: 2, // Sombra sutil para Android
-    shadowColor: '#000', // Sombra sutil para iOS
+    elevation: 2,
+    shadowColor: '#000',
     shadowOffset: { width: 0, height: 1 },
     shadowOpacity: 0.2,
     shadowRadius: 1.41,
