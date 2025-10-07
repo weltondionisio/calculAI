@@ -4,7 +4,8 @@ import { View, Text, TouchableOpacity, StyleSheet } from 'react-native';
 const HomeScreen = ({ navigation }) => {
   return (
     <View style={styles.container}>
-      <Text style={styles.title}>CalculAI</Text>
+      {/* O título da tela agora está no cabeçalho, mas podemos manter um na tela se quisermos */}
+      <Text style={styles.welcomeText}>Bem-vindo ao seu tutor de Matemática</Text>
       
       {/* BOTÃO 1: CHAT */}
       <TouchableOpacity 
@@ -36,28 +37,34 @@ const HomeScreen = ({ navigation }) => {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: 'white',
+    backgroundColor: '#F5F5F5', // Fundo levemente cinza para contraste
     alignItems: 'center',
-    justifyContent: 'center',
     padding: 20,
+    paddingTop: 50,
   },
-  title: {
-    fontSize: 28,
-    fontWeight: 'bold',
+  welcomeText: {
+    fontSize: 22,
+    fontWeight: '600',
     marginBottom: 40,
     color: '#333',
+    textAlign: 'center',
   },
   button: {
     width: '90%',
-    padding: 15,
-    borderRadius: 10,
+    padding: 18,
+    borderRadius: 12,
     marginVertical: 10,
     alignItems: 'center',
+    elevation: 2, // Sombra sutil para Android
+    shadowColor: '#000', // Sombra sutil para iOS
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.2,
+    shadowRadius: 1.41,
   },
   buttonText: {
     fontSize: 18,
-    fontWeight: '600',
-    color: '#333', // Cor escura para contrastar com a paleta suave
+    fontWeight: '700',
+    color: '#333',
   }
 });
 

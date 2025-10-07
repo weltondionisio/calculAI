@@ -1,7 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { View, Text, TextInput, FlatList, TouchableOpacity, StyleSheet, ActivityIndicator } from 'react-native';
+import { View, Text, TextInput, FlatList, TouchableOpacity, StyleSheet, ActivityIndicator, Alert } from 'react-native';
 import { GoogleGenerativeAI } from '@google/genai';
-import MathView from 'react-native-math-view'; // Renderiza LaTeX
 
 // Definição do System Prompt para forçar a restrição
 const SYSTEM_PROMPT = `
@@ -9,7 +8,8 @@ Você é o "CalculAI", um professor de matemática especializado em reforço esc
 `;
 
 // Substitua pela sua chave REAL
-const API_KEY = "SUA_CHAVE_GEMINI_AQUI";
+// IMPORTANTE: COLOQUE SUA CHAVE AQUI!
+const API_KEY = "AIzaSyBLsSMLqMkX0wXODwsOheMl4jyEooqW2v8"; 
 
 const ai = new GoogleGenerativeAI(API_KEY);
 const model = ai.getGenerativeModel({
@@ -27,10 +27,31 @@ const ChatScreen = () => {
     const [loading, setLoading] = useState(false);
     const flatListRef = useRef(null);
 
+    // Adiciona uma mensagem de boas-vindas inicial
+    useEffect(() => {
+        setMessages([
+            { 
+                text: "Olá! Eu sou o CalculAI, seu professor particular de Matemática do Ensino Médio. Como posso te ajudar hoje?", 
+                isUser: false, 
+                key: 'welcome' 
+            }
+        ]);
+    }, []);
+
+    // Função para rolar a lista para o final
+    const scrollToBottom = () => {
+        flatListRef.current?.scrollToEnd({ animated: true });
+    };
+
     const sendMessage = async () => {
         if (!input.trim() || loading) return;
 
-        const userMessage = { text: input, isUser: true, key: String(Date.now()) }; // Add key for FlatList
+        if (API_KEY === "SUA_CHAVE_GEMINI_AQUI" || !API_KEY) {
+            Alert.alert("Erro de API", "Por favor, substitua 'SUA_CHAVE_GEMINI_AQUI' pela sua chave de API real no ChatScreen.js.");
+            return;
+        }
+
+        const userMessage = { text: input, isUser: true, key: String(Date.now()) };
         setMessages(prev => [...prev, userMessage]);
         setInput('');
         setLoading(true);
@@ -38,78 +59,64 @@ const ChatScreen = () => {
         try {
             // Chamada à API
             const response = await model.generateContent(input);
-            const aiMessageText = response.text();
+            const aiMessageText = response.text;
 
-            // Simplesmente divide a mensagem por $ para identificar blocos de texto vs. LaTeX
-            const parts = aiMessageText.split('$');
             const aiMessage = {
                 text: aiMessageText,
                 isUser: false,
-                parts: parts,
-                key: String(Date.now() + 1), // Add key for FlatList
+                key: String(Date.now() + 1),
             };
 
             setMessages(prev => [...prev, aiMessage]);
 
         } catch (error) {
             console.error("Erro na API do Gemini:", error);
-            setMessages(prev => [...prev, { text: "Desculpe, houve um erro ao processar sua solicitação.", isUser: false, key: String(Date.now() + 2) }]); // Add key for FlatList
+            setMessages(prev => [...prev, { text: "Desculpe, houve um erro ao processar sua solicitação. Verifique sua chave de API e sua conexão.", isUser: false, key: String(Date.now() + 2) }]);
         } finally {
             setLoading(false);
+            // Pequeno atraso para garantir que a FlatList seja atualizada antes da rolagem
+            setTimeout(scrollToBottom, 100); 
         }
     };
 
+    // FUNÇÃO DE RENDERIZAÇÃO CORRIGIDA: AGORA SÓ USA <Text>
     const renderMessageContent = (message) => {
-        // Renderiza cada parte da mensagem, separando o texto comum do LaTeX
-        if (message.isUser) {
-            return <Text style={styles.messageText}>{message.text}</Text>;
-        }
-
-        return message.parts.map((part, index) => {
-            // Se for um índice ímpar, é uma fórmula em LaTeX
-            if (index % 2 !== 0) {
-                // MathView precisa de um string de LaTeX válido
-                return (
-                    <MathView
-                        key={index}
-                        config={{ exSize: 15 }}
-                        math={part}
-                        style={styles.mathView}
-                    />
-                );
-            }
-            // Se for par, é texto comum
-            if (part) {
-                return <Text key={index} style={styles.messageText}>{part}</Text>;
-            }
-            return null;
-        });
+        // Renderiza a mensagem, incluindo o LaTeX como texto simples (string)
+        return <Text style={styles.messageText}>{message.text}</Text>;
     };
+
+    const renderItem = ({ item: msg }) => (
+        <View
+            key={msg.key}
+            style={[
+                styles.messageBubble,
+                {
+                    alignSelf: msg.isUser ? 'flex-end' : 'flex-start',
+                    backgroundColor: msg.isUser ? '#A1C4FC' : '#EEE',
+                },
+            ]}
+        >
+            {renderMessageContent(msg)}
+        </View>
+    );
 
     return (
         <View style={styles.container}>
             <FlatList
                 ref={flatListRef}
                 data={messages}
-                renderItem={({ item: msg }) => (
-                    <View
-                        key={msg.key}
-                        style={[
-                            styles.messageBubble,
-                            {
-                                alignSelf: msg.isUser ? 'flex-end' : 'flex-start',
-                                backgroundColor: msg.isUser ? '#A1C4FC' : '#EEE', // Azul para usuário
-                            },
-                        ]}
-                    >
-                        {renderMessageContent(msg)}
-                    </View>
-                )}
+                renderItem={renderItem}
                 keyExtractor={(item) => item.key}
                 style={styles.messageList}
-                onContentSizeChange={() => flatListRef.current?.scrollToEnd({ animated: true })}
-                onLayout={() => flatListRef.current?.scrollToEnd({ animated: true })}
+                // Garante que a rolagem aconteça após o envio de uma nova mensagem
+                onContentSizeChange={scrollToBottom} 
             />
+            {loading && (
+                <View style={styles.loadingContainer}>
+                    <ActivityIndicator size="small" color="#A1C4FC" />
+                    <Text style={styles.loadingText}>Calculando...</Text>
+                </View>
+            )}
 
             <View style={styles.inputContainer}>
                 <TextInput
@@ -149,10 +156,17 @@ const styles = StyleSheet.create({
     messageText: {
         fontSize: 16,
         color: '#333',
-        fontFamily: 'sans-serif-light', // Fonte simples e arredondada
     },
-    mathView: {
-        marginVertical: 5,
+    loadingContainer: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        justifyContent: 'flex-start',
+        paddingHorizontal: 15,
+        marginBottom: 5,
+    },
+    loadingText: {
+        marginLeft: 8,
+        color: '#666',
     },
     inputContainer: {
         flexDirection: 'row',
