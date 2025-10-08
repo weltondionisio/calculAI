@@ -9,7 +9,8 @@ import {
     ActivityIndicator,
     Alert,
     ScrollView,
-    Linking
+    Linking,
+    Image
 } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
@@ -93,21 +94,15 @@ const PlanningScreen = () => {
     const [activePlans, setActivePlans] = useState([]);
     const flatListRef = useRef(null);
 
-    useEffect(() => {
-        loadActivePlans();
-    }, []);
+    useEffect(() => { loadActivePlans(); }, []);
 
-    const scrollToBottom = () => {
-        setTimeout(() => flatListRef.current?.scrollToEnd({ animated: true }), 50);
-    };
+    const scrollToBottom = () => { setTimeout(() => flatListRef.current?.scrollToEnd({ animated: true }), 50); };
 
     const loadActivePlans = async () => {
         try {
             const storedPlans = await AsyncStorage.getItem('@activePlans');
             setActivePlans(storedPlans ? JSON.parse(storedPlans) : []);
-        } catch (error) {
-            console.error('Erro ao carregar planos ativos:', error);
-        }
+        } catch (error) { console.error('Erro ao carregar planos ativos:', error); }
     };
 
     const saveActivePlans = async (plans) => {
@@ -117,11 +112,10 @@ const PlanningScreen = () => {
 
     const markPlanCompleted = async (plan) => {
         try {
-            // Remove dos ativos
             const remainingPlans = activePlans.filter(p => p.planGoal !== plan.planGoal);
-            await saveActivePlans(remainingPlans);
+            setActivePlans(remainingPlans);
+            await AsyncStorage.setItem('@activePlans', JSON.stringify(remainingPlans));
 
-            // Salva nos planos completados
             const completedJSON = await AsyncStorage.getItem('@completedPlans');
             const completedPlans = completedJSON ? JSON.parse(completedJSON) : [];
             await AsyncStorage.setItem('@completedPlans', JSON.stringify([
@@ -129,15 +123,13 @@ const PlanningScreen = () => {
                 { ...plan, completed: true, completedAt: new Date().toISOString() }
             ]));
 
+            setCurrentPlan(null);
             Alert.alert("Parabéns!", `Plano "${plan.planGoal}" concluído e registrado nas métricas.`);
-        } catch (error) {
-            console.error('Erro ao marcar plano completo:', error);
-        }
+        } catch (error) { console.error('Erro ao marcar plano completo:', error); }
     };
 
     const sendMessage = async () => {
         if (!input.trim() || loading) return;
-
         const userMessage = { text: input, isUser: true, key: String(Date.now()) };
         setMessages(prev => [...prev, userMessage]);
         setInput('');
@@ -148,38 +140,96 @@ const PlanningScreen = () => {
         try {
             const result = await geminiApiCall(userMessage.text);
             let jsonText = result.text;
-            if (jsonText.startsWith('```json')) {
-                jsonText = jsonText.replace(/```json|```/g, '');
-            }
+            if (jsonText.startsWith('```json')) jsonText = jsonText.replace(/```json|```/g, '');
             const parsedPlan = JSON.parse(jsonText);
 
-            // Salvar no histórico de planos ativos
             const newActivePlans = [...activePlans, parsedPlan];
-            await saveActivePlans(newActivePlans);
-
+            setActivePlans(newActivePlans);
+            await AsyncStorage.setItem('@activePlans', JSON.stringify(newActivePlans));
             setCurrentPlan(parsedPlan);
 
         } catch (error) {
             setMessages(prev => [...prev, { content: `Erro: ${error.message}`, isUser: false, key: String(Date.now() + 1) }]);
-        } finally {
-            setLoading(false);
+        } finally { setLoading(false); }
+    };
+
+    const sendTasksToMetrics = async (plan) => {
+        try {
+            const json = await AsyncStorage.getItem('@todoTasks');
+            const existingTasks = json ? JSON.parse(json) : [];
+
+            const historicalJson = await AsyncStorage.getItem('@historicalTasks');
+            const historicalTasks = historicalJson ? JSON.parse(historicalJson) : [];
+
+            const tasksToAdd = plan.tasks.map((task, index) => {
+                let hours = 1;
+                if (task.timeSlot) {
+                    const match = task.timeSlot.match(/(\d{1,2}):(\d{2})\s*-\s*(\d{1,2}):(\d{2})/);
+                    if (match) {
+                        const startHour = parseInt(match[1], 10);
+                        const startMin = parseInt(match[2], 10);
+                        const endHour = parseInt(match[3], 10);
+                        const endMin = parseInt(match[4], 10);
+                        hours = (endHour + endMin/60) - (startHour + startMin/60);
+                    }
+                }
+
+                const taskObj = {
+                    id: Date.now().toString() + index,
+                    text: task.topic,
+                    hours: Number(hours.toFixed(1)),
+                    completed: false,
+                    date: new Date().toISOString(),
+                };
+
+                historicalTasks.push({ ...taskObj, sentFromPlan: true });
+                return taskObj;
+            });
+
+            const newTasks = [...tasksToAdd, ...existingTasks];
+            await AsyncStorage.setItem('@todoTasks', JSON.stringify(newTasks));
+            await AsyncStorage.setItem('@historicalTasks', JSON.stringify(historicalTasks));
+
+            Alert.alert('Sucesso', `Todas as tarefas do plano "${plan.planGoal}" foram enviadas para a Lista de tarefas.`);
+
+        } catch (error) {
+            console.error('Erro ao enviar tarefas para MetricsScreen:', error);
+            Alert.alert('Erro', 'Não foi possível enviar as tarefas.');
         }
     };
 
-    const renderItem = ({ item: msg }) => (
-        <View
-            key={msg.key}
-            style={[
-                styles.messageBubble,
-                {
-                    alignSelf: msg.isUser ? 'flex-end' : 'flex-start',
-                    backgroundColor: msg.isUser ? '#FFF699' : '#EEE',
-                },
-            ]}
-        >
-            <Text style={styles.messageText}>{msg.text || msg.content}</Text>
-        </View>
-    );
+    const renderItem = ({ item: msg }) => {
+        // Mensagem inicial com ícone
+        if (!msg.isUser && msg.key === 'init') {
+            return (
+                <View style={{ flexDirection: 'row', alignItems: 'flex-start', marginBottom: 10 }}>
+                    <Image
+                        source={require('../assets/iconhead.png')}
+                        style={{ width: 50, height: 50, marginRight: 10, borderRadius: 25 }}
+                        resizeMode="contain"
+                    />
+                    <View style={{ flexShrink: 1, backgroundColor: '#EEE', borderRadius: 15, padding: 10 }}>
+                        <Text style={{ fontSize: 15, color: '#333', lineHeight: 22 }}>
+                            {msg.content}
+                        </Text>
+                    </View>
+                </View>
+            );
+        }
+
+        // Outras mensagens
+        return (
+            <View
+                key={msg.key}
+                style={[
+                    styles.messageBubble,
+                    { alignSelf: msg.isUser ? 'flex-end' : 'flex-start', backgroundColor: msg.isUser ? '#FFF699' : '#EEE' }
+                ]}
+            >
+                <Text style={styles.messageText}>{msg.text || msg.content}</Text>
+            </View>
+        );
+    };
 
     const renderPlanView = () => {
         if (!currentPlan) return null;
@@ -219,8 +269,7 @@ const PlanningScreen = () => {
                         const endDate = new Date(startDate);
                         endDate.setHours(startDate.getHours() + 1);
 
-                        const formatDate = (d) =>
-                            d.toISOString().replace(/[-:]/g, '').split('.')[0] + 'Z';
+                        const formatDate = (d) => d.toISOString().replace(/[-:]/g, '').split('.')[0] + 'Z';
 
                         const gStart = formatDate(startDate);
                         const gEnd = formatDate(endDate);
@@ -236,9 +285,7 @@ const PlanningScreen = () => {
                                         {task.day || `Dia ${index + 1}`} - {startDate.toLocaleDateString('pt-BR')}
                                     </Text>
                                     <View style={styles.timeSlotBadge}>
-                                        <Text style={styles.timeSlotText}>
-                                            {task.timeSlot || '20:00 - 21:00'}
-                                        </Text>
+                                        <Text style={styles.timeSlotText}>{task.timeSlot || '20:00 - 21:00'}</Text>
                                     </View>
                                 </View>
                                 <Text style={styles.taskTopicDetail}>{task.topic}</Text>
@@ -248,14 +295,21 @@ const PlanningScreen = () => {
                                     onPress={() => Linking.openURL(calendarLink)}
                                     style={styles.calendarLinkButton}
                                 >
-                                    <Text style={styles.calendarLinkText}>
-                                        ➕ Adicionar ao Google Calendar
-                                    </Text>
+                                    <Text style={styles.calendarLinkText}>➕ Adicionar ao Google Calendar</Text>
                                 </TouchableOpacity>
                             </View>
                         );
                     })}
                 </View>
+
+                <TouchableOpacity
+                    onPress={() => sendTasksToMetrics(plan)}
+                    style={[styles.scheduleButtonDetailed, { backgroundColor: '#4CAF50' }]}
+                    accessible={true}
+                    accessibilityLabel="Enviar tarefas para Todo List"
+                >
+                    <Text style={[styles.scheduleButtonTextDetailed, { color: '#FFF' }]}>📥 Enviar para a lista de tarefas</Text>
+                </TouchableOpacity>
 
                 <TouchableOpacity
                     onPress={() => markPlanCompleted(plan)}
@@ -351,10 +405,10 @@ const styles = StyleSheet.create({
     timeSlotText: { fontSize: 12, fontWeight: 'bold', color: '#333' },
     taskTopicDetail: { fontSize: 17, fontWeight: 'bold', color: '#333', marginBottom: 5 },
     taskActivities: { fontSize: 14, color: '#666', fontStyle: 'italic' },
-    calendarLinkButton: { marginTop: 8, paddingVertical: 6 },
-    calendarLinkText: { color: '#1A73E8', fontSize: 14, textDecorationLine: 'underline' },
-    scheduleButtonDetailed: { backgroundColor: '#FDD835', padding: 15, borderRadius: 25, marginTop: 25, alignItems: 'center', elevation: 5 },
-    scheduleButtonTextDetailed: { color: '#333', fontWeight: 'bold', fontSize: 16 },
+    calendarLinkButton: { marginTop: 5 },
+    calendarLinkText: { color: '#007AFF', fontSize: 14 },
+    scheduleButtonDetailed: { backgroundColor: '#FFD54F', borderRadius: 20, padding: 12, marginTop: 15, alignItems: 'center' },
+    scheduleButtonTextDetailed: { fontSize: 16, fontWeight: 'bold' }
 });
 
 export default PlanningScreen;
