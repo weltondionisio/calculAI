@@ -4,7 +4,7 @@ import {
 } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { MaterialIcons } from '@expo/vector-icons';
-import * as Clipboard from 'expo-clipboard'; // ✅ import para copiar
+import * as Clipboard from 'expo-clipboard'; // ✅ copiar texto
 
 const { width: screenWidth } = Dimensions.get('window');
 
@@ -125,6 +125,22 @@ const MetricsScreen = () => {
     AsyncStorage.setItem('@todoTasks', JSON.stringify(updatedTasks)).catch(console.error);
   };
 
+  // ✅ Copiar tarefa individual
+  const copyTask = async (task) => {
+    try {
+      const text = `${task.text} (${task.hours}h)`;
+      if (Platform.OS === 'web' && navigator.clipboard) {
+        await navigator.clipboard.writeText(text);
+      } else {
+        await Clipboard.setStringAsync(text);
+      }
+      Alert.alert('Copiado', `Tarefa "${task.text}" copiada para a área de transferência.`);
+    } catch (err) {
+      console.error(err);
+      Alert.alert('Erro', 'Não foi possível copiar a tarefa.');
+    }
+  };
+
   // ===== captura + download estilo story =====
   const captureAndShare = async () => {
     if (Platform.OS === 'web') {
@@ -153,12 +169,10 @@ const MetricsScreen = () => {
       Alert.alert('Erro', 'Não foi possível compartilhar a imagem.');
     }
   };
-  // ========================================
 
-  // ===== copiar todas as tarefas pendentes =====
+  // ✅ Copiar todas as tarefas
   const copyAllTasksToClipboard = async () => {
     try {
-      // Filtra tarefas que ainda não foram concluídas
       const pendingTasks = tasks.filter(t => !completedHistory.some(h => h.id === t.id));
       if (pendingTasks.length === 0) {
         Alert.alert('Nenhuma tarefa', 'Não há tarefas pendentes para copiar.');
@@ -172,13 +186,12 @@ const MetricsScreen = () => {
       } else {
         await Clipboard.setStringAsync(allText);
       }
-      Alert.alert('Copiado', 'Todas as tarefas pendentes foram copiadas para a área de transferência.');
+      Alert.alert('Copiado', 'Todas as tarefas pendentes foram copiadas.');
     } catch (err) {
       console.error(err);
-      Alert.alert('Erro', 'Não foi possível copiar todas as tarefas.');
+      Alert.alert('Erro', 'Não foi possível copiar as tarefas.');
     }
   };
-  // ========================================
 
   const MetricCard = ({ title, value, unit, color }) => (
     <View style={[styles.card, { borderLeftColor: color, backgroundColor: theme.card, shadowColor: isDark ? '#000' : '#333' }]}>
@@ -195,19 +208,13 @@ const MetricsScreen = () => {
       style={{ flex: 1, backgroundColor: theme.background, minHeight: '100vh' }}
       contentContainerStyle={{ padding: 20 }}
     >
-      {/* STORY DE MÉTRICAS (apenas) */}
       <StoryWrapper
         ref={metricsContainerRef}
         style={[styles.storyContainer, { backgroundColor: theme.card }]}
         {...(Platform.OS === 'web' ? { id: 'storyContainer' } : {})}
       >
         <View style={styles.metricsRow}>
-          <Image
-            source={require('../assets/iconstudy.png')}
-            style={styles.storyIcon}
-            resizeMode="contain"
-          />
-
+          <Image source={require('../assets/iconstudy.png')} style={styles.storyIcon} resizeMode="contain" />
           <View style={styles.metricsGridStory}>
             <MetricCard title="Horas Totais" value={metrics.totalStudyHours} unit="h" color="#007AFF" />
             <MetricCard title="Média/Dia" value={metrics.avgStudyHoursPerDay} unit="h/dia" color="#4CDA64" />
@@ -217,17 +224,22 @@ const MetricsScreen = () => {
         </View>
       </StoryWrapper>
 
-      <TouchableOpacity onPress={captureAndShare} style={[styles.addButton, { backgroundColor: '#4CAF50', alignSelf: 'center', marginVertical: 20 }]}>
+      <TouchableOpacity onPress={captureAndShare} style={[styles.addButton, { backgroundColor: '#4CAF50', alignSelf: 'center', marginVertical: 15 }]}>
         <MaterialIcons name="share" size={24} color="white" />
       </TouchableOpacity>
 
-      {/* botão de copiar todas as tarefas pendentes */}
-      <TouchableOpacity onPress={copyAllTasksToClipboard} style={[styles.addButton, { backgroundColor: '#007AFF', alignSelf: 'center', marginVertical: 10 }]}>
+      <TouchableOpacity onPress={copyAllTasksToClipboard} style={[styles.addButton, { backgroundColor: '#007AFF', alignSelf: 'center', marginBottom: 20 }]}>
         <MaterialIcons name="content-copy" size={24} color="white" />
       </TouchableOpacity>
 
-      {/* Lista de tarefas */}
+      {/* 🟢 Botão grande de adicionar tarefa */}
+      <TouchableOpacity onPress={addTask} style={[styles.addButton, { backgroundColor: theme.accent, alignSelf: 'center', marginBottom: 20, flexDirection: 'row' }]}>
+        <MaterialIcons name="add-circle-outline" size={24} color="white" />
+        <Text style={{ color: 'white', fontWeight: 'bold', marginLeft: 8 }}>Adicionar Tarefa</Text>
+      </TouchableOpacity>
+
       <Text style={[styles.sectionTitle, { color: theme.text }]}>📋 Lista de tarefas</Text>
+
       <View style={styles.addTaskContainer}>
         <TextInput
           style={[styles.input, { flex: 2, backgroundColor: theme.inputBackground, color: theme.text, borderColor: theme.border }]}
@@ -239,9 +251,6 @@ const MetricsScreen = () => {
           value={newTaskHours} onChangeText={setNewTaskHours}
           placeholder="Horas" keyboardType="numeric" placeholderTextColor={theme.placeholder}
         />
-        <TouchableOpacity onPress={addTask} style={[styles.addButton, { backgroundColor: theme.accent }]}>
-          <MaterialIcons name="event-note" size={24} color="white" />
-        </TouchableOpacity>
       </View>
 
       <FlatList
@@ -261,6 +270,10 @@ const MetricsScreen = () => {
               <Text style={[styles.taskText, { color: theme.text }, item.completed && { textDecorationLine: 'line-through', color: theme.textSecondary }]} numberOfLines={1}>
                 {item.text} ({item.hours}h)
               </Text>
+              {/* ✅ Botão de copiar individual */}
+              <TouchableOpacity onPress={() => copyTask(item)} style={{ marginLeft: 6 }}>
+                <MaterialIcons name="content-copy" size={22} color="#007AFF" />
+              </TouchableOpacity>
               <TouchableOpacity onPress={() => deleteTask(item.id)} style={styles.deleteButton}>
                 <MaterialIcons name="delete" size={22} color="#FF3B30" />
               </TouchableOpacity>
@@ -286,27 +299,9 @@ const styles = StyleSheet.create({
     padding: 20,
     alignSelf: 'center',
   },
-  metricsRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'flex-start',
-    flexWrap: 'wrap',
-    width: '100%',
-  },
-  storyIcon: {
-    width: 120,
-    height: 120,
-    marginRight: 20,
-    marginBottom: 10,
-  },
-  metricsGridStory: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    justifyContent: 'flex-start',
-    alignItems: 'center',
-    gap: 10,
-    flex: 1,
-  },
+  metricsRow: { flexDirection: 'row', alignItems: 'center', flexWrap: 'wrap', width: '100%' },
+  storyIcon: { width: 120, height: 120, marginRight: 20, marginBottom: 10 },
+  metricsGridStory: { flexDirection: 'row', flexWrap: 'wrap', gap: 10, flex: 1 },
   card: {
     flexBasis: '45%',
     maxWidth: 200,
@@ -327,7 +322,7 @@ const styles = StyleSheet.create({
   addTaskContainer: { flexDirection: 'row', marginBottom: 20, alignItems: 'center' },
   input: { borderWidth: 1, borderRadius: 25, paddingHorizontal: 15, paddingVertical: 10 },
   addButton: { borderRadius: 25, padding: 12, justifyContent: 'center', alignItems: 'center' },
-  taskItem: { flexDirection: 'row', alignItems: 'center', marginBottom: 12, justifyContent: 'space-between' },
+  taskItem: { flexDirection: 'row', alignItems: 'center', marginBottom: 12 },
   taskText: { fontSize: 16, marginLeft: 10, flex: 1 },
   checkbox: { width: 24, height: 24, borderRadius: 12, borderWidth: 2, justifyContent: 'center', alignItems: 'center', marginRight: 8 },
   deleteButton: { marginLeft: 8 },
