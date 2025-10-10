@@ -4,6 +4,7 @@ import {
 } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { MaterialIcons } from '@expo/vector-icons';
+import * as Clipboard from 'expo-clipboard'; // ✅ import para copiar
 
 const { width: screenWidth } = Dimensions.get('window');
 
@@ -154,6 +155,31 @@ const MetricsScreen = () => {
   };
   // ========================================
 
+  // ===== copiar todas as tarefas pendentes =====
+  const copyAllTasksToClipboard = async () => {
+    try {
+      // Filtra tarefas que ainda não foram concluídas
+      const pendingTasks = tasks.filter(t => !completedHistory.some(h => h.id === t.id));
+      if (pendingTasks.length === 0) {
+        Alert.alert('Nenhuma tarefa', 'Não há tarefas pendentes para copiar.');
+        return;
+      }
+
+      const allText = pendingTasks.map(t => `${t.text} (${t.hours}h)`).join('\n');
+
+      if (Platform.OS === 'web' && navigator.clipboard) {
+        await navigator.clipboard.writeText(allText);
+      } else {
+        await Clipboard.setStringAsync(allText);
+      }
+      Alert.alert('Copiado', 'Todas as tarefas pendentes foram copiadas para a área de transferência.');
+    } catch (err) {
+      console.error(err);
+      Alert.alert('Erro', 'Não foi possível copiar todas as tarefas.');
+    }
+  };
+  // ========================================
+
   const MetricCard = ({ title, value, unit, color }) => (
     <View style={[styles.card, { borderLeftColor: color, backgroundColor: theme.card, shadowColor: isDark ? '#000' : '#333' }]}>
       <Text style={[styles.cardValue, { color }]}>{value}</Text>
@@ -195,6 +221,11 @@ const MetricsScreen = () => {
         <MaterialIcons name="share" size={24} color="white" />
       </TouchableOpacity>
 
+      {/* botão de copiar todas as tarefas pendentes */}
+      <TouchableOpacity onPress={copyAllTasksToClipboard} style={[styles.addButton, { backgroundColor: '#007AFF', alignSelf: 'center', marginVertical: 10 }]}>
+        <MaterialIcons name="content-copy" size={24} color="white" />
+      </TouchableOpacity>
+
       {/* Lista de tarefas */}
       <Text style={[styles.sectionTitle, { color: theme.text }]}>📋 Lista de tarefas</Text>
       <View style={styles.addTaskContainer}>
@@ -204,7 +235,7 @@ const MetricsScreen = () => {
           placeholder="Nome da tarefa" placeholderTextColor={theme.placeholder}
         />
         <TextInput
-          style={[styles.input, { flex: 1, marginRight: 8, backgroundColor: theme.inputBackground, color: theme.text, borderColor: theme.border }]}
+          style={[styles.input, { width: 80, marginHorizontal: 8, backgroundColor: theme.inputBackground, color: theme.text, borderColor: theme.border }]}
           value={newTaskHours} onChangeText={setNewTaskHours}
           placeholder="Horas" keyboardType="numeric" placeholderTextColor={theme.placeholder}
         />
