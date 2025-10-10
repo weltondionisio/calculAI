@@ -146,7 +146,6 @@ const PlanningScreen = () => {
         } finally { setLoading(false); }
     };
 
-    // === ENVIA TAREFAS PARA MÉTRICAS ===
     const sendTasksToMetrics = async (plan) => {
         try {
             const json = await AsyncStorage.getItem('@todoTasks');
@@ -199,17 +198,25 @@ const PlanningScreen = () => {
                     alignSelf: msg.isUser ? 'flex-end' : 'flex-start',
                     backgroundColor: msg.isUser
                         ? (isDark ? '#FBC02D' : '#FFF799')
-                        : (isDark ? '#444' : '#EEE')
+                        : (isDark ? '#444' : '#EEE'),
+                    flexDirection: msg.isUser ? 'row-reverse' : 'row',
+                    alignItems: 'flex-start'
                 }
             ]}
         >
+            {!msg.isUser && (
+                <Image
+                    source={require('../assets/iconhead.png')}
+                    style={{ width: 24, height: 24, marginRight: 8, marginTop: 2 }}
+                    resizeMode="contain"
+                />
+            )}
             <Text style={[styles.messageText, { color: isDark ? '#FFF' : '#333' }]}>
                 {msg.text || msg.content}
             </Text>
         </View>
     );
 
-    // === RENDERIZA PLANO ===
     const renderPlanView = () => {
         if (!currentPlan) return null;
         const plan = currentPlan;
@@ -234,16 +241,31 @@ const PlanningScreen = () => {
 
                 <Text style={[styles.sectionTitle, { color: theme.text }]}>🗓️ Cronograma Detalhado</Text>
 
-                {plan.tasks.map((task, index) => (
-                    <View key={index} style={[styles.taskItemDetailed, { backgroundColor: isDark ? '#333' : '#FAFAFA' }]}>
-                        <Text style={[styles.taskTopicDetail, { color: theme.text }]}>{task.topic}</Text>
-                        <Text style={[styles.taskActivities, { color: theme.textSecondary }]}>{task.activities}</Text>
-                    </View>
-                ))}
+                {plan.tasks.map((task, index) => {
+                    const startDate = encodeURIComponent(task.date?.replace(/-/g, '').replace(/T.*/, '') || '');
+                    const endDate = encodeURIComponent(task.date?.replace(/-/g, '').replace(/T.*/, '') || '');
+                    const text = encodeURIComponent(task.topic);
+                    const details = encodeURIComponent(task.activities || '');
+                    const calendarUrl = `https://calendar.google.com/calendar/render?action=TEMPLATE&text=${text}&details=${details}&dates=${startDate}/${endDate}`;
+
+                    return (
+                        <View key={index} style={[styles.taskItemDetailed, { backgroundColor: isDark ? '#333' : '#FAFAFA' }]}>
+                            <Text style={[styles.taskTopicDetail, { color: theme.text }]}>{task.topic}</Text>
+                            <Text style={[styles.taskActivities, { color: theme.textSecondary }]}>{task.activities}</Text>
+
+                            <TouchableOpacity onPress={() => Linking.openURL(calendarUrl)}>
+                                <Text style={[styles.calendarLink, { color: '#2196F3', marginTop: 5 }]}>
+                                    📅 Adicionar ao Google Calendar
+                                </Text>
+                            </TouchableOpacity>
+                        </View>
+                    );
+                })}
 
                 <TouchableOpacity onPress={() => sendTasksToMetrics(plan)} style={[styles.scheduleButtonDetailed, { backgroundColor: '#4CAF50' }]}>
                     <Text style={[styles.scheduleButtonTextDetailed, { color: '#FFF' }]}>📥 Enviar para a lista</Text>
                 </TouchableOpacity>
+
                 <TouchableOpacity onPress={() => markPlanCompleted(plan)} style={[styles.scheduleButtonDetailed, { backgroundColor: '#FFD54F' }]}>
                     <Text style={styles.scheduleButtonTextDetailed}>✅ Marcar como Concluído</Text>
                 </TouchableOpacity>
@@ -318,7 +340,12 @@ const styles = StyleSheet.create({
     taskTopicDetail: { fontSize: 17, fontWeight: 'bold', marginBottom: 5 },
     taskActivities: { fontSize: 14, fontStyle: 'italic' },
     scheduleButtonDetailed: { borderRadius: 20, padding: 12, marginTop: 15, alignItems: 'center' },
-    scheduleButtonTextDetailed: { fontSize: 16, fontWeight: 'bold' }
+    scheduleButtonTextDetailed: { fontSize: 16, fontWeight: 'bold' },
+    calendarLink: {
+        fontSize: 14,
+        fontWeight: '600',
+        textDecorationLine: 'underline'
+    }
 });
 
 export default PlanningScreen;
