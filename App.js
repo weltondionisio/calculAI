@@ -1,9 +1,12 @@
 import 'react-native-gesture-handler';
-import React from 'react';
-import { NavigationContainer } from '@react-navigation/native';
+import React, { useContext } from 'react';
+import { NavigationContainer, DefaultTheme, DarkTheme } from '@react-navigation/native';
 import { createStackNavigator } from '@react-navigation/stack';
 import { StatusBar, Platform, KeyboardAvoidingView } from 'react-native';
 import { SafeAreaProvider, SafeAreaView } from 'react-native-safe-area-context';
+
+// 🧩 IMPORTA O PROVIDER E O CONTEXTO
+import { ThemeProvider, ThemeContext } from './ThemeContext';
 
 import HomeScreen from './screens/HomeScreen';
 import ChatScreen from './screens/ChatScreen';
@@ -12,38 +15,66 @@ import MetricsScreen from './screens/MetricsScreen';
 
 const Stack = createStackNavigator();
 
+// 🔹 Componente separado que consome o tema e monta a navegação
+function MainNavigator() {
+  const { isDark, theme } = useContext(ThemeContext);
+
+  return (
+    <>
+      <StatusBar
+        barStyle={isDark ? 'light-content' : 'dark-content'}
+        backgroundColor={theme.background}
+      />
+
+      <NavigationContainer theme={isDark ? DarkTheme : DefaultTheme}>
+        <Stack.Navigator
+          initialRouteName="Home"
+          screenOptions={{
+            headerTintColor: theme.text,
+            headerStyle: { backgroundColor: theme.card },
+            headerTitleStyle: { fontWeight: 'bold' },
+          }}
+        >
+          <Stack.Screen
+            name="Home"
+            component={HomeScreen}
+            options={{ title: 'calculAI' }}
+          />
+          <Stack.Screen
+            name="Chat"
+            component={ChatScreen}
+            options={{ title: 'ProfessorIA' }}
+          />
+          <Stack.Screen
+            name="Planning"
+            component={PlanningScreen}
+            options={{ title: 'Plano de Estudos' }}
+          />
+          <Stack.Screen
+            name="Metrics"
+            component={MetricsScreen}
+            options={{ title: 'Desempenho e Métricas' }}
+          />
+        </Stack.Navigator>
+      </NavigationContainer>
+    </>
+  );
+}
+
 export default function App() {
   return (
-    <SafeAreaProvider>
-      {/* Inclui TODAS as bordas seguras, inclusive o bottom */}
-      <SafeAreaView
-        style={{ flex: 1, backgroundColor: '#F7F7F7' }}
-        edges={['top', 'right', 'left', 'bottom']}  // 👈 importante
-      >
-        {/* Evita que o teclado esconda o conteúdo (Android e iOS) */}
-        <KeyboardAvoidingView
-          style={{ flex: 1 }}
-          behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
-        >
-          <StatusBar barStyle="dark-content" backgroundColor="#F7F7F7" />
-
-          <NavigationContainer>
-            <Stack.Navigator
-              initialRouteName="Home"
-              screenOptions={{
-                headerTintColor: '#333',
-                headerStyle: { backgroundColor: 'white' },
-                headerTitleStyle: { fontWeight: 'bold' },
-              }}
-            >
-              <Stack.Screen name="Home" component={HomeScreen} options={{ title: 'calculAI' }} />
-              <Stack.Screen name="Chat" component={ChatScreen} options={{ title: 'ProfessorIA' }} />
-              <Stack.Screen name="Planning" component={PlanningScreen} options={{ title: 'Plano de Estudos' }} />
-              <Stack.Screen name="Metrics" component={MetricsScreen} options={{ title: 'Desempenho e Métricas' }} />
-            </Stack.Navigator>
-          </NavigationContainer>
-        </KeyboardAvoidingView>
-      </SafeAreaView>
-    </SafeAreaProvider>
+    // 🔹 Provider global para todo o app
+    <ThemeProvider>
+      <SafeAreaProvider>
+        <SafeAreaView style={{ flex: 1 }} edges={['top', 'right', 'left', 'bottom']}>
+          <KeyboardAvoidingView
+            style={{ flex: 1 }}
+            behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+          >
+            <MainNavigator />
+          </KeyboardAvoidingView>
+        </SafeAreaView>
+      </SafeAreaProvider>
+    </ThemeProvider>
   );
 }

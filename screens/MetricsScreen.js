@@ -1,13 +1,22 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useContext, useRef } from 'react';
 import { 
-  View, Text, StyleSheet, FlatList, TextInput, TouchableOpacity, Alert, Image, Dimensions
+  View, Text, StyleSheet, FlatList, TextInput, TouchableOpacity, Alert, Image, Dimensions, ScrollView, Platform
 } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { MaterialIcons } from '@expo/vector-icons';
 
 const { width: screenWidth } = Dimensions.get('window');
 
+let ViewShot, Share;
+if (Platform.OS !== 'web') {
+  ViewShot = require('react-native-view-shot').default;
+  Share = require('react-native-share').default;
+}
+
 const MetricsScreen = () => {
+  const { theme, isDark } = useContext(require('../ThemeContext').ThemeContext);
+  const metricsContainerRef = useRef(null);
+
   const [metrics, setMetrics] = useState({
     totalStudyHours: 0,
     avgStudyHoursPerDay: 0,
@@ -16,39 +25,30 @@ const MetricsScreen = () => {
   });
 
   const [tasks, setTasks] = useState([]);
-  const [completedHistory, setCompletedHistory] = useState([]); 
+  const [completedHistory, setCompletedHistory] = useState([]);
   const [newTaskName, setNewTaskName] = useState('');
   const [newTaskHours, setNewTaskHours] = useState('');
 
-  useEffect(() => {
-    loadTasks();
-    loadHistory();
-  }, []);
+  useEffect(() => { loadData(); }, []);
 
   const dateOnly = (d) => new Date(d).toISOString().split('T')[0];
 
-  const loadTasks = async () => {
+  const loadData = async () => {
     try {
-      const json = await AsyncStorage.getItem('@todoTasks');
-      const savedTasks = json ? JSON.parse(json) : [];
-      setTasks(savedTasks);
-      updateMetrics(savedTasks, completedHistory);
-    } catch (error) { console.error(error); }
-  };
+      const tasksJson = await AsyncStorage.getItem('@todoTasks');
+      const savedTasks = tasksJson ? JSON.parse(tasksJson) : [];
+      const historyJson = await AsyncStorage.getItem('@completedHistory');
+      const savedHistory = historyJson ? JSON.parse(historyJson) : [];
 
-  const loadHistory = async () => {
-    try {
-      const json = await AsyncStorage.getItem('@completedHistory');
-      const savedHistory = json ? JSON.parse(json) : [];
+      setTasks(savedTasks);
       setCompletedHistory(savedHistory);
-      updateMetrics(tasks, savedHistory);
+      updateMetrics(savedTasks, savedHistory);
     } catch (error) { console.error(error); }
   };
 
   const updateMetrics = (taskList, historyList) => {
     const today = new Date();
-    const weekAgo = new Date();
-    weekAgo.setDate(today.getDate() - 6);
+    const weekAgo = new Date(); weekAgo.setDate(today.getDate() - 6);
 
     const countedTasks = historyList.filter(h => h.counted);
     const recentTasks = countedTasks.filter(t => new Date(t.date) >= weekAgo);
@@ -99,25 +99,16 @@ const MetricsScreen = () => {
     setTasks(newTasks);
     AsyncStorage.setItem('@todoTasks', JSON.stringify(newTasks)).catch(console.error);
 
-    setNewTaskName('');
-    setNewTaskHours('');
+    setNewTaskName(''); setNewTaskHours('');
   };
 
   const toggleTaskCompletion = (id) => {
     const task = tasks.find(t => t.id === id);
     if (!task) return;
-
     if (completedHistory.some(h => h.id === task.id)) return;
 
-    const updatedTasks = tasks.map(t => {
-      if (t.id === id) return { ...t, completed: true, date: new Date().toISOString() };
-      return t;
-    });
-
-    const newHistory = [
-      ...completedHistory,
-      { ...task, completed: true, counted: true, date: new Date().toISOString() }
-    ];
+    const updatedTasks = tasks.map(t => t.id === id ? { ...t, completed: true, date: new Date().toISOString() } : t);
+    const newHistory = [...completedHistory, { ...task, completed: true, counted: true, date: new Date().toISOString() }];
 
     setTasks(updatedTasks);
     setCompletedHistory(newHistory);
@@ -133,118 +124,182 @@ const MetricsScreen = () => {
     AsyncStorage.setItem('@todoTasks', JSON.stringify(updatedTasks)).catch(console.error);
   };
 
+  // ===== captura + download estilo story =====
+  const captureAndShare = async () => {
+    if (Platform.OS === 'web') {
+      try {
+        const htmlToImage = (await import('html-to-image')).default;
+        const node = document.getElementById('storyContainer');
+        if (!node) return;
+        const dataUrl = await htmlToImage.toPng(node);
+        const link = document.createElement('a');
+        link.href = dataUrl;
+        link.download = 'metrics_story.png';
+        link.click();
+      } catch (err) {
+        console.error(err);
+        alert('Não foi possível gerar a imagem no Web.');
+      }
+      return;
+    }
+
+    try {
+      if (!metricsContainerRef.current) return;
+      const uri = await metricsContainerRef.current.capture({ format: 'png', quality: 1 });
+      await Share.open({ url: uri, type: 'image/png', title: 'Compartilhar Métricas' });
+    } catch (error) {
+      console.error(error);
+      Alert.alert('Erro', 'Não foi possível compartilhar a imagem.');
+    }
+  };
+  // ========================================
+
   const MetricCard = ({ title, value, unit, color }) => (
-    <View style={[styles.card, { borderLeftColor: color }]}>
+    <View style={[styles.card, { borderLeftColor: color, backgroundColor: theme.card, shadowColor: isDark ? '#000' : '#333' }]}>
       <Text style={[styles.cardValue, { color }]}>{value}</Text>
-      <Text style={styles.cardUnit}>{unit}</Text>
-      <Text style={styles.cardTitle}>{title}</Text>
+      <Text style={[styles.cardUnit, { color: theme.text }]}>{unit}</Text>
+      <Text style={[styles.cardTitle, { color: theme.textSecondary }]}>{title}</Text>
     </View>
   );
 
-  const renderTaskItem = ({ item }) => {
-    const isCounted = completedHistory.some(h => h.id === item.id);
-    return (
-      <View style={styles.taskItem}>
-        <TouchableOpacity
-          onPress={() => toggleTaskCompletion(item.id)}
-          style={styles.checkbox}
-          disabled={isCounted}
-        >
-          {item.completed && <MaterialIcons name="check" size={20} color="white" />}
-        </TouchableOpacity>
-
-        <Text style={[styles.taskText, item.completed && { textDecorationLine: 'line-through', color: '#999' }]}>
-          {item.text} ({item.hours}h)
-        </Text>
-
-        <TouchableOpacity onPress={() => deleteTask(item.id)} style={styles.deleteButton}>
-          <MaterialIcons name="delete" size={22} color="#FF3B30" />
-        </TouchableOpacity>
-      </View>
-    );
-  };
+  const StoryWrapper = Platform.OS !== 'web' ? ViewShot : View;
 
   return (
-    <FlatList
-      data={tasks}
-      keyExtractor={item => item.id}
-      renderItem={renderTaskItem}
-      contentContainerStyle={styles.contentContainer}
-      ListHeaderComponent={
-        <>
+    <ScrollView
+      style={{ flex: 1, backgroundColor: theme.background, minHeight: '100vh' }}
+      contentContainerStyle={{ padding: 20 }}
+    >
+      {/* STORY DE MÉTRICAS (apenas) */}
+      <StoryWrapper
+        ref={metricsContainerRef}
+        style={[styles.storyContainer, { backgroundColor: theme.card }]}
+        {...(Platform.OS === 'web' ? { id: 'storyContainer' } : {})}
+      >
+        <View style={styles.metricsRow}>
           <Image
             source={require('../assets/iconstudy.png')}
-            style={{ width: screenWidth * 0.3, height: screenWidth * 0.3, alignSelf: 'center', marginBottom: 10 }}
+            style={styles.storyIcon}
             resizeMode="contain"
           />
-          <Text style={styles.headerTitle}>Seu Desempenho Semanal</Text>
-          <Text style={styles.headerSubtitle}>Acompanhe suas metas de estudo.</Text>
 
-          <View style={styles.metricsGrid}>
-            <MetricCard title="Horas Totais de Estudo" value={metrics.totalStudyHours} unit="h" color="#007AFF" />
-            <MetricCard title="Média por Dia" value={metrics.avgStudyHoursPerDay} unit="h/dia" color="#4CDA64" />
-            <MetricCard title="Tarefas Concluídas" value={metrics.tasksCompleted} unit="tarefas" color="#FF9500" />
+          <View style={styles.metricsGridStory}>
+            <MetricCard title="Horas Totais" value={metrics.totalStudyHours} unit="h" color="#007AFF" />
+            <MetricCard title="Média/Dia" value={metrics.avgStudyHoursPerDay} unit="h/dia" color="#4CDA64" />
+            <MetricCard title="Tarefas" value={metrics.tasksCompleted} unit="concluídas" color="#FF9500" />
             <MetricCard title="Dias Seguidos" value={metrics.currentStreak} unit="dias" color="#FF3B30" />
           </View>
+        </View>
+      </StoryWrapper>
 
-          <Text style={styles.sectionTitle}>📋 Lista de tarefas</Text>
-          <View style={styles.addTaskContainer}>
-            <TextInput
-              style={[styles.input, { flex: 2 }]}
-              value={newTaskName}
-              onChangeText={setNewTaskName}
-              placeholder="Nome da tarefa"
-            />
-            <TextInput
-              style={[styles.input, { flex: 1, marginRight: 8 }]}
-              value={newTaskHours}
-              onChangeText={setNewTaskHours}
-              placeholder="Horas"
-              keyboardType="numeric"
-            />
-            <TouchableOpacity onPress={addTask} style={styles.addButton}>
-              <MaterialIcons name="event-note" size={24} color="white" />
-            </TouchableOpacity>
-          </View>
+      <TouchableOpacity onPress={captureAndShare} style={[styles.addButton, { backgroundColor: '#4CAF50', alignSelf: 'center', marginVertical: 20 }]}>
+        <MaterialIcons name="share" size={24} color="white" />
+      </TouchableOpacity>
 
-          {tasks.length === 0 && (
-            <Text style={{ color: '#666', marginVertical: 20 }}>Nenhuma tarefa adicionada.</Text>
-          )}
-        </>
-      }
-    />
+      {/* Lista de tarefas */}
+      <Text style={[styles.sectionTitle, { color: theme.text }]}>📋 Lista de tarefas</Text>
+      <View style={styles.addTaskContainer}>
+        <TextInput
+          style={[styles.input, { flex: 2, backgroundColor: theme.inputBackground, color: theme.text, borderColor: theme.border }]}
+          value={newTaskName} onChangeText={setNewTaskName}
+          placeholder="Nome da tarefa" placeholderTextColor={theme.placeholder}
+        />
+        <TextInput
+          style={[styles.input, { flex: 1, marginRight: 8, backgroundColor: theme.inputBackground, color: theme.text, borderColor: theme.border }]}
+          value={newTaskHours} onChangeText={setNewTaskHours}
+          placeholder="Horas" keyboardType="numeric" placeholderTextColor={theme.placeholder}
+        />
+        <TouchableOpacity onPress={addTask} style={[styles.addButton, { backgroundColor: theme.accent }]}>
+          <MaterialIcons name="event-note" size={24} color="white" />
+        </TouchableOpacity>
+      </View>
+
+      <FlatList
+        data={tasks}
+        keyExtractor={item => item.id}
+        renderItem={({ item }) => {
+          const isCounted = completedHistory.some(h => h.id === item.id);
+          return (
+            <View style={styles.taskItem}>
+              <TouchableOpacity
+                onPress={() => toggleTaskCompletion(item.id)}
+                style={[styles.checkbox, { borderColor: theme.accent, backgroundColor: item.completed ? theme.accent : 'transparent' }]}
+                disabled={isCounted}
+              >
+                {item.completed && <MaterialIcons name="check" size={20} color="white" />}
+              </TouchableOpacity>
+              <Text style={[styles.taskText, { color: theme.text }, item.completed && { textDecorationLine: 'line-through', color: theme.textSecondary }]} numberOfLines={1}>
+                {item.text} ({item.hours}h)
+              </Text>
+              <TouchableOpacity onPress={() => deleteTask(item.id)} style={styles.deleteButton}>
+                <MaterialIcons name="delete" size={22} color="#FF3B30" />
+              </TouchableOpacity>
+            </View>
+          );
+        }}
+        contentContainerStyle={{ paddingBottom: 30 }}
+      />
+
+      {tasks.length === 0 && (
+        <Text style={{ color: theme.textSecondary, marginVertical: 20 }}>Nenhuma tarefa adicionada.</Text>
+      )}
+    </ScrollView>
   );
 };
 
 const styles = StyleSheet.create({
-  contentContainer: { padding: 20 },
-  headerTitle: { fontSize: 24, fontWeight: 'bold', color: '#333', marginBottom: 5 },
-  headerSubtitle: { fontSize: 16, color: '#666', marginBottom: 20 },
-  metricsGrid: { flexDirection: 'row', flexWrap: 'wrap', justifyContent: 'space-between', marginBottom: 30 },
+  storyContainer: {
+    width: '100%',
+    maxWidth: 700,
+    minHeight: 220,
+    borderRadius: 16,
+    padding: 20,
+    alignSelf: 'center',
+  },
+  metricsRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'flex-start',
+    flexWrap: 'wrap',
+    width: '100%',
+  },
+  storyIcon: {
+    width: 120,
+    height: 120,
+    marginRight: 20,
+    marginBottom: 10,
+  },
+  metricsGridStory: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    justifyContent: 'flex-start',
+    alignItems: 'center',
+    gap: 10,
+    flex: 1,
+  },
   card: {
-    width: '48%',
-    backgroundColor: 'white',
+    flexBasis: '45%',
+    maxWidth: 200,
     borderRadius: 12,
     padding: 15,
-    marginBottom: 15,
-    shadowColor: '#000',
+    marginVertical: 8,
     shadowOffset: { width: 0, height: 2 },
     shadowOpacity: 0.1,
     shadowRadius: 3,
     elevation: 3,
     borderLeftWidth: 5,
+    alignItems: 'center',
   },
-  cardTitle: { fontSize: 14, color: '#888', marginTop: 5 },
-  cardValue: { fontSize:32, fontWeight:'900', lineHeight:38 },
-  cardUnit: { fontSize:14, fontWeight:'600', color:'#555' },
-  sectionTitle: { fontSize:18, fontWeight:'bold', color:'#333', marginBottom:10 },
-  addTaskContainer: { flexDirection:'row', marginBottom:20, alignItems:'center' },
-  input: { borderWidth:1, borderColor:'#A1C4FC', borderRadius:25, paddingHorizontal:15, paddingVertical:10 },
-  addButton: { backgroundColor:'#A1C4FC', borderRadius:25, padding:12, justifyContent:'center', alignItems:'center' },
-  taskItem: { flexDirection:'row', alignItems:'center', marginBottom:12, justifyContent:'space-between' },
-  taskText: { fontSize:16, color:'#333', marginLeft:10, flex:1 },
-  checkbox: { width:24, height:24, borderRadius:12, borderWidth:2, borderColor:'#007AFF', justifyContent:'center', alignItems:'center', backgroundColor:'#007AFF20', marginRight:8 },
-  deleteButton: { marginLeft:8 },
+  cardTitle: { fontSize: 14, marginTop: 5 },
+  cardValue: { fontSize: 32, fontWeight: '900', lineHeight: 38 },
+  cardUnit: { fontSize: 14, fontWeight: '600' },
+  sectionTitle: { fontSize: 18, fontWeight: 'bold', marginBottom: 10 },
+  addTaskContainer: { flexDirection: 'row', marginBottom: 20, alignItems: 'center' },
+  input: { borderWidth: 1, borderRadius: 25, paddingHorizontal: 15, paddingVertical: 10 },
+  addButton: { borderRadius: 25, padding: 12, justifyContent: 'center', alignItems: 'center' },
+  taskItem: { flexDirection: 'row', alignItems: 'center', marginBottom: 12, justifyContent: 'space-between' },
+  taskText: { fontSize: 16, marginLeft: 10, flex: 1 },
+  checkbox: { width: 24, height: 24, borderRadius: 12, borderWidth: 2, justifyContent: 'center', alignItems: 'center', marginRight: 8 },
+  deleteButton: { marginLeft: 8 },
 });
 
 export default MetricsScreen;

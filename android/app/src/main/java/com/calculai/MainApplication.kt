@@ -1,4 +1,4 @@
-package com.anonymous.calculaimathtutor
+package com.calculai
 
 import android.app.Application
 import android.content.res.Configuration

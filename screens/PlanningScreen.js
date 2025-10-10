@@ -1,4 +1,5 @@
-import React, { useState, useRef, useEffect } from 'react';
+// PlanningScreen.js
+import React, { useState, useRef, useContext } from 'react';
 import { 
     StyleSheet, 
     View, 
@@ -12,15 +13,19 @@ import {
     Linking,
     Image
 } from 'react-native';
-import AsyncStorage from '@react-native-async-storage/async-storage';
+import { ThemeContext } from '../ThemeContext'; // Certifique-se do caminho correto
+import iconHead from '../assets/iconhead.png'; // Caminho correto para assets
 
 const sleep = (ms) => new Promise(resolve => setTimeout(resolve, ms));
 
+// --- LÓGICA DA CHAMADA REAL À GEMINI API ---
 const geminiApiCall = async (prompt) => {
+    console.log("Chamando API Gemini com prompt:", prompt);
+
     const apiKey = "AIzaSyBLsSMLqMkX0wXODwsOheMl4jyEooqW2v8";
     const apiUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-05-20:generateContent?key=${apiKey}`; 
 
-    const systemPrompt = "Você é um assistente de planejamento e cronograma de estudos. Sua função é gerar planos de estudo em JSON. Retorne somente JSON.";
+    const systemPrompt = "Você é um assistente de planejamento e cronograma de estudos voltados apenas a matemática, ciência de dados, inteligência artificial e programação. Sua única função é gerar um plano de estudos detalhado em formato JSON, baseado na requisição do usuário. Retorne o JSON diretamente, sem texto explicativo. Use sempre o idioma português.";
 
     const responseSchema = {
         type: "OBJECT",
@@ -68,14 +73,17 @@ const geminiApiCall = async (prompt) => {
             if (!response.ok) {
                 const status = response.status;
                 let errorBody = await response.text();
+                if (status === 403) {
+                    errorBody = "Erro 403: Chave da API Gemini inválida ou ausente.";
+                }
                 throw new Error(`API Error: ${status} - ${errorBody}`);
             }
 
             const result = await response.json();
             const text = result.candidates?.[0]?.content?.parts?.[0]?.text;
             if (!text) throw new Error("Resposta vazia da API Gemini.");
-            return { text, error: null };
 
+            return { text, error: null };
         } catch (error) {
             lastError = error;
             if (i < maxRetries - 1) await sleep(Math.pow(2, i) * 1000);
@@ -85,51 +93,32 @@ const geminiApiCall = async (prompt) => {
 };
 
 const PlanningScreen = () => {
+    const { theme } = useContext(ThemeContext);
+
     const [messages, setMessages] = useState([
-        { key: 'init', content: 'Olá! Diga-me o que você quer estudar.', isUser: false }
+        { key: 'init', content: 'Olá! Diga-me o que você quer estudar ou planejar (ex: "estudar frações por 5 dias").', isUser: false }
     ]);
     const [currentPlan, setCurrentPlan] = useState(null);
     const [input, setInput] = useState('');
     const [loading, setLoading] = useState(false);
-    const [activePlans, setActivePlans] = useState([]);
     const flatListRef = useRef(null);
 
-    useEffect(() => { loadActivePlans(); }, []);
-
-    const scrollToBottom = () => { setTimeout(() => flatListRef.current?.scrollToEnd({ animated: true }), 50); };
-
-    const loadActivePlans = async () => {
-        try {
-            const storedPlans = await AsyncStorage.getItem('@activePlans');
-            setActivePlans(storedPlans ? JSON.parse(storedPlans) : []);
-        } catch (error) { console.error('Erro ao carregar planos ativos:', error); }
+    const scrollToBottom = () => {
+        setTimeout(() => {
+            flatListRef.current?.scrollToEnd({ animated: true });
+        }, 50);
     };
 
-    const saveActivePlans = async (plans) => {
-        setActivePlans(plans);
-        await AsyncStorage.setItem('@activePlans', JSON.stringify(plans));
-    };
-
-    const markPlanCompleted = async (plan) => {
-        try {
-            const remainingPlans = activePlans.filter(p => p.planGoal !== plan.planGoal);
-            setActivePlans(remainingPlans);
-            await AsyncStorage.setItem('@activePlans', JSON.stringify(remainingPlans));
-
-            const completedJSON = await AsyncStorage.getItem('@completedPlans');
-            const completedPlans = completedJSON ? JSON.parse(completedJSON) : [];
-            await AsyncStorage.setItem('@completedPlans', JSON.stringify([
-                ...completedPlans,
-                { ...plan, completed: true, completedAt: new Date().toISOString() }
-            ]));
-
-            setCurrentPlan(null);
-            Alert.alert("Parabéns!", `Plano "${plan.planGoal}" concluído e registrado nas métricas.`);
-        } catch (error) { console.error('Erro ao marcar plano completo:', error); }
+    const handleScheduling = (plan) => {
+        Alert.alert(
+            "Agendamento de Tarefas",
+            `O plano "${plan.planGoal}" com ${plan.tasks.length} tarefas pode ser adicionado manualmente ao Google Calendar.`
+        );
     };
 
     const sendMessage = async () => {
         if (!input.trim() || loading) return;
+
         const userMessage = { text: input, isUser: true, key: String(Date.now()) };
         setMessages(prev => [...prev, userMessage]);
         setInput('');
@@ -137,96 +126,59 @@ const PlanningScreen = () => {
         setCurrentPlan(null);
         scrollToBottom();
 
+        let aiMessageContent = null;
         try {
             const result = await geminiApiCall(userMessage.text);
-            let jsonText = result.text;
-            if (jsonText.startsWith('```json')) jsonText = jsonText.replace(/```json|```/g, '');
-            const parsedPlan = JSON.parse(jsonText);
-
-            const newActivePlans = [...activePlans, parsedPlan];
-            setActivePlans(newActivePlans);
-            await AsyncStorage.setItem('@activePlans', JSON.stringify(newActivePlans));
-            setCurrentPlan(parsedPlan);
-
-        } catch (error) {
-            setMessages(prev => [...prev, { content: `Erro: ${error.message}`, isUser: false, key: String(Date.now() + 1) }]);
-        } finally { setLoading(false); }
-    };
-
-    const sendTasksToMetrics = async (plan) => {
-        try {
-            const json = await AsyncStorage.getItem('@todoTasks');
-            const existingTasks = json ? JSON.parse(json) : [];
-
-            const historicalJson = await AsyncStorage.getItem('@historicalTasks');
-            const historicalTasks = historicalJson ? JSON.parse(historicalJson) : [];
-
-            const tasksToAdd = plan.tasks.map((task, index) => {
-                let hours = 1;
-                if (task.timeSlot) {
-                    const match = task.timeSlot.match(/(\d{1,2}):(\d{2})\s*-\s*(\d{1,2}):(\d{2})/);
-                    if (match) {
-                        const startHour = parseInt(match[1], 10);
-                        const startMin = parseInt(match[2], 10);
-                        const endHour = parseInt(match[3], 10);
-                        const endMin = parseInt(match[4], 10);
-                        hours = (endHour + endMin/60) - (startHour + startMin/60);
-                    }
+            if (result.text) {
+                let jsonText = result.text;
+                if (jsonText.startsWith('```json')) {
+                    jsonText = jsonText.replace(/```json|```/g, '');
                 }
-
-                const taskObj = {
-                    id: Date.now().toString() + index,
-                    text: task.topic,
-                    hours: Number(hours.toFixed(1)),
-                    completed: false,
-                    date: new Date().toISOString(),
-                };
-
-                historicalTasks.push({ ...taskObj, sentFromPlan: true });
-                return taskObj;
-            });
-
-            const newTasks = [...tasksToAdd, ...existingTasks];
-            await AsyncStorage.setItem('@todoTasks', JSON.stringify(newTasks));
-            await AsyncStorage.setItem('@historicalTasks', JSON.stringify(historicalTasks));
-
-            Alert.alert('Sucesso', `Todas as tarefas do plano "${plan.planGoal}" foram enviadas para a Lista de tarefas.`);
-
+                const parsedPlan = JSON.parse(jsonText);
+                setCurrentPlan(parsedPlan);
+                return;
+            } else if (result.error) {
+                throw new Error(result.error.message);
+            } else {
+                aiMessageContent = "Resposta vazia da API.";
+            }
         } catch (error) {
-            console.error('Erro ao enviar tarefas para MetricsScreen:', error);
-            Alert.alert('Erro', 'Não foi possível enviar as tarefas.');
+            aiMessageContent = `Erro ao gerar plano: ${error.message}`;
+        } finally {
+            setLoading(false);
+            if (aiMessageContent) {
+                setMessages(prev => [...prev, { content: aiMessageContent, isUser: false, key: String(Date.now() + 1) }]);
+                scrollToBottom();
+            }
         }
     };
 
     const renderItem = ({ item: msg }) => {
-        // Mensagem inicial com ícone
-        if (!msg.isUser && msg.key === 'init') {
-            return (
-                <View style={{ flexDirection: 'row', alignItems: 'flex-start', marginBottom: 10 }}>
-                    <Image
-                        source={require('../assets/iconhead.png')}
-                        style={{ width: 50, height: 50, marginRight: 10, borderRadius: 25 }}
-                        resizeMode="contain"
-                    />
-                    <View style={{ flexShrink: 1, backgroundColor: '#EEE', borderRadius: 15, padding: 10 }}>
-                        <Text style={{ fontSize: 15, color: '#333', lineHeight: 22 }}>
-                            {msg.content}
-                        </Text>
-                    </View>
-                </View>
-            );
-        }
-
-        // Outras mensagens
+        const isUser = msg.isUser;
         return (
             <View
                 key={msg.key}
-                style={[
-                    styles.messageBubble,
-                    { alignSelf: msg.isUser ? 'flex-end' : 'flex-start', backgroundColor: msg.isUser ? '#FFF699' : '#EEE' }
-                ]}
+                style={[styles.messageRow, { justifyContent: isUser ? 'flex-end' : 'flex-start' }]}
             >
-                <Text style={styles.messageText}>{msg.text || msg.content}</Text>
+                {!isUser && (
+                    <Image source={iconHead} style={styles.aiIcon} />
+                )}
+
+                <View
+                    style={[
+                        styles.messageBubble,
+                        {
+                            maxWidth: '75%',
+                            backgroundColor: isUser ? '#FFF699' : theme.card,
+                            paddingVertical: isUser ? 12 : 20,
+                            paddingHorizontal: isUser ? 12 : 20,
+                        },
+                    ]}
+                >
+                    <Text style={[styles.messageText, { color: isUser ? '#333' : theme.text, fontSize: !isUser ? 16 : 15 }]}>
+                        {msg.text || msg.content}
+                    </Text>
+                </View>
             </View>
         );
     };
@@ -236,13 +188,14 @@ const PlanningScreen = () => {
         const plan = currentPlan;
 
         return (
-            <ScrollView style={styles.planViewContainer} contentContainerStyle={styles.planContentContainer}>
-                <Text style={styles.mainTitle}>{plan.planGoal}</Text>
+            <ScrollView style={[styles.planViewContainer, { backgroundColor: theme.background }]} contentContainerStyle={styles.planContentContainer}>
+                <Text style={[styles.mainTitle, { color: theme.text }]}>{plan.planGoal}</Text>
+
                 <TouchableOpacity onPress={() => setCurrentPlan(null)} style={styles.backButton}>
-                    <Text style={styles.backButtonText}>← Iniciar Novo Plano</Text>
+                    <Text style={[styles.backButtonText, { color: theme.primary }]}>← Iniciar Novo Plano</Text>
                 </TouchableOpacity>
 
-                <Text style={styles.sectionTitle}>📊 Métricas do Plano</Text>
+                <Text style={[styles.sectionTitle, { color: theme.textSecondary }]}>📊 Métricas do Plano</Text>
                 <View style={styles.metricsContainer}>
                     <View style={[styles.metricCard, styles.metricCardBlue]}>
                         <Text style={styles.metricValue}>{plan.tasks.length}</Text>
@@ -254,22 +207,25 @@ const PlanningScreen = () => {
                     </View>
                 </View>
 
-                <Text style={styles.sectionTitle}>🗓️ Cronograma Detalhado</Text>
+                <Text style={[styles.sectionTitle, { color: theme.textSecondary }]}>🗓️ Cronograma Detalhado</Text>
                 <View style={styles.scheduleContainer}>
                     {plan.tasks.map((task, index) => {
                         const startDate = new Date();
                         startDate.setDate(startDate.getDate() + index);
+
                         let startHour = 20, startMin = 0;
                         const match = task.timeSlot?.match(/(\d{1,2})[:h](\d{2})?/);
                         if (match) {
                             startHour = parseInt(match[1], 10);
                             startMin = parseInt(match[2] || '00', 10);
                         }
+
                         startDate.setHours(startHour, startMin, 0, 0);
                         const endDate = new Date(startDate);
                         endDate.setHours(startDate.getHours() + 1);
 
-                        const formatDate = (d) => d.toISOString().replace(/[-:]/g, '').split('.')[0] + 'Z';
+                        const formatDate = (d) =>
+                            d.toISOString().replace(/[-:]/g, '').split('.')[0] + 'Z';
 
                         const gStart = formatDate(startDate);
                         const gEnd = formatDate(endDate);
@@ -279,23 +235,27 @@ const PlanningScreen = () => {
                         const calendarLink = `https://calendar.google.com/calendar/u/0/r/eventedit?text=${eventTitle}&dates=${gStart}/${gEnd}&details=${eventDetails}`;
 
                         return (
-                            <View key={index} style={styles.taskItemDetailed}>
+                            <View key={index} style={[styles.taskItemDetailed, { backgroundColor: theme.card }]}>
                                 <View style={styles.taskHeader}>
-                                    <Text style={styles.taskDayDetail}>
+                                    <Text style={[styles.taskDayDetail, { color: theme.textSecondary }]}>
                                         {task.day || `Dia ${index + 1}`} - {startDate.toLocaleDateString('pt-BR')}
                                     </Text>
                                     <View style={styles.timeSlotBadge}>
-                                        <Text style={styles.timeSlotText}>{task.timeSlot || '20:00 - 21:00'}</Text>
+                                        <Text style={styles.timeSlotText}>
+                                            {task.timeSlot || '20:00 - 21:00'}
+                                        </Text>
                                     </View>
                                 </View>
-                                <Text style={styles.taskTopicDetail}>{task.topic}</Text>
-                                <Text style={styles.taskActivities}>{task.activities}</Text>
+                                <Text style={[styles.taskTopicDetail, { color: theme.text }]}>{task.topic}</Text>
+                                <Text style={[styles.taskActivities, { color: theme.textSecondary }]}>{task.activities}</Text>
 
                                 <TouchableOpacity
                                     onPress={() => Linking.openURL(calendarLink)}
                                     style={styles.calendarLinkButton}
                                 >
-                                    <Text style={styles.calendarLinkText}>➕ Adicionar ao Google Calendar</Text>
+                                    <Text style={styles.calendarLinkText}>
+                                        ➕ Adicionar ao Google Calendar
+                                    </Text>
                                 </TouchableOpacity>
                             </View>
                         );
@@ -303,21 +263,12 @@ const PlanningScreen = () => {
                 </View>
 
                 <TouchableOpacity
-                    onPress={() => sendTasksToMetrics(plan)}
-                    style={[styles.scheduleButtonDetailed, { backgroundColor: '#4CAF50' }]}
-                    accessible={true}
-                    accessibilityLabel="Enviar tarefas para Todo List"
-                >
-                    <Text style={[styles.scheduleButtonTextDetailed, { color: '#FFF' }]}>📥 Enviar para a lista de tarefas</Text>
-                </TouchableOpacity>
-
-                <TouchableOpacity
-                    onPress={() => markPlanCompleted(plan)}
+                    onPress={() => handleScheduling(plan)}
                     style={styles.scheduleButtonDetailed}
                     accessible={true}
-                    accessibilityLabel="Marcar plano como concluído"
+                    accessibilityLabel="Agendar todas as tarefas no calendário"
                 >
-                    <Text style={styles.scheduleButtonTextDetailed}>✅ Marcar como Concluído</Text>
+                    <Text style={styles.scheduleButtonTextDetailed}>Agendar Todas no Calendário</Text>
                 </TouchableOpacity>
 
                 <View style={{ height: 40 }} />
@@ -326,7 +277,7 @@ const PlanningScreen = () => {
     };
 
     return (
-        <View style={styles.container}>
+        <View style={[styles.container, { backgroundColor: theme.background }]}>
             {currentPlan ? (
                 renderPlanView()
             ) : (
@@ -340,19 +291,20 @@ const PlanningScreen = () => {
                 />
             )}
 
-            <View style={styles.inputArea}>
+            <View style={[styles.inputArea, { backgroundColor: theme.card }]}>
                 {loading && (
                     <View style={styles.loadingContainer}>
-                        <ActivityIndicator size="small" color="#666" />
-                        <Text style={styles.loadingText}>Gerando plano...</Text>
+                        <ActivityIndicator size="small" color={theme.textSecondary} />
+                        <Text style={[styles.loadingText, { color: theme.textSecondary }]}>Gerando plano...</Text>
                     </View>
                 )}
                 <View style={styles.inputContainer}>
                     <TextInput
-                        style={styles.input}
+                        style={[styles.input, { color: theme.text, borderColor: theme.textSecondary, backgroundColor: theme.background }]}
                         value={input}
                         onChangeText={setInput}
                         placeholder="Ex: Equações de 1º grau em 10 dias"
+                        placeholderTextColor={theme.textSecondary}
                         editable={!loading}
                         onSubmitEditing={sendMessage}
                     />
@@ -362,9 +314,9 @@ const PlanningScreen = () => {
                         disabled={!input.trim() || loading}
                     >
                         {loading ? (
-                            <ActivityIndicator size="small" color="#333" />
+                            <ActivityIndicator size="small" color={theme.text} />
                         ) : (
-                            <Text style={styles.sendButtonText}>Gerar</Text>
+                            <Text style={[styles.sendButtonText, { color: theme.text }]}>Gerar</Text>
                         )}
                     </TouchableOpacity>
                 </View>
@@ -374,41 +326,65 @@ const PlanningScreen = () => {
 };
 
 const styles = StyleSheet.create({
-    container: { flex: 1, backgroundColor: '#F9F9F9' },
+    container: { flex: 1 },
     messageList: { flex: 1, padding: 10 },
-    messageBubble: { maxWidth: '90%', padding: 12, borderRadius: 15, marginVertical: 4 },
-    messageText: { fontSize: 15, color: '#333', lineHeight: 22 },
-    inputArea: { borderTopWidth: 1, borderTopColor: '#E0E0E0', backgroundColor: '#FFF' },
+    messageRow: { flexDirection: 'row', marginVertical: 6, alignItems: 'flex-start' },
+    messageBubble: { borderRadius: 15 },
+    messageText: { lineHeight: 22 },
+    aiIcon: { width: 40, height: 40, marginRight: 10, borderRadius: 20 },
+    inputArea: { borderTopWidth: 1, borderTopColor: '#E0E0E0' },
     loadingContainer: { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 15, paddingVertical: 5 },
-    loadingText: { marginLeft: 8, color: '#666', fontSize: 13 },
+    loadingText: { marginLeft: 8, fontSize: 13 },
     inputContainer: { flexDirection: 'row', padding: 10 },
-    input: { flex: 1, borderWidth: 1, borderColor: '#CCC', borderRadius: 20, paddingHorizontal: 15, paddingVertical: 10, marginRight: 8, backgroundColor: '#FFF', fontSize: 15 },
-    sendButton: { backgroundColor: '#FDD835', borderRadius: 20, paddingHorizontal: 15, paddingVertical: 10, justifyContent: 'center', alignItems: 'center' },
+    input: {
+        flex: 1,
+        borderWidth: 1,
+        borderRadius: 20,
+        paddingHorizontal: 15,
+        paddingVertical: 10,
+        marginRight: 8,
+        fontSize: 15,
+    },
+    sendButton: {
+        backgroundColor: '#FDD835',
+        borderRadius: 20,
+        paddingHorizontal: 15,
+        paddingVertical: 10,
+        justifyContent: 'center',
+        alignItems: 'center',
+    },
     sendButtonDisabled: { backgroundColor: '#CCC' },
-    sendButtonText: { color: '#333', fontWeight: 'bold', fontSize: 15 },
-    planViewContainer: { flex: 1, backgroundColor: '#FFF' },
+    sendButtonText: { fontWeight: 'bold', fontSize: 15 },
+    planViewContainer: { flex: 1 },
     planContentContainer: { padding: 20 },
-    mainTitle: { fontSize: 24, fontWeight: 'bold', color: '#333', borderBottomWidth: 3, borderBottomColor: '#FDD835', paddingBottom: 5 },
+    mainTitle: { fontSize: 24, fontWeight: 'bold', borderBottomWidth: 3, borderBottomColor: '#FDD835', paddingBottom: 5 },
     backButton: { marginBottom: 20, alignSelf: 'flex-start', paddingVertical: 5 },
-    backButtonText: { color: '#007AFF', fontSize: 16 },
-    sectionTitle: { fontSize: 18, fontWeight: '600', color: '#555', marginTop: 15, marginBottom: 10 },
+    backButtonText: { fontSize: 16 },
+    sectionTitle: { fontSize: 18, fontWeight: '600', marginTop: 15, marginBottom: 10 },
     metricsContainer: { flexDirection: 'row', justifyContent: 'space-between', marginBottom: 20 },
     metricCard: { flex: 1, padding: 15, borderRadius: 12, marginHorizontal: 5 },
     metricCardBlue: { backgroundColor: '#E3F2FD', borderLeftWidth: 4, borderLeftColor: '#2196F3' },
     metricCardGreen: { backgroundColor: '#E8F5E9', borderLeftWidth: 4, borderLeftColor: '#4CAF50' },
-    metricValue: { fontSize: 28, fontWeight: 'bold', color: '#333' },
-    metricLabel: { fontSize: 13, color: '#666', marginTop: 5 },
-    taskItemDetailed: { backgroundColor: '#FAFAFA', padding: 15, borderRadius: 10, marginBottom: 10 },
+    metricValue: { fontSize: 28, fontWeight: 'bold' },
+    metricLabel: { fontSize: 13, marginTop: 5 },
+    taskItemDetailed: { padding: 15, borderRadius: 10, marginBottom: 10 },
     taskHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 5 },
-    taskDayDetail: { fontSize: 15, fontWeight: '600', color: '#555' },
+    taskDayDetail: { fontSize: 15, fontWeight: '600' },
     timeSlotBadge: { backgroundColor: '#FFECB3', paddingHorizontal: 8, paddingVertical: 3, borderRadius: 15 },
-    timeSlotText: { fontSize: 12, fontWeight: 'bold', color: '#333' },
-    taskTopicDetail: { fontSize: 17, fontWeight: 'bold', color: '#333', marginBottom: 5 },
-    taskActivities: { fontSize: 14, color: '#666', fontStyle: 'italic' },
-    calendarLinkButton: { marginTop: 5 },
-    calendarLinkText: { color: '#007AFF', fontSize: 14 },
-    scheduleButtonDetailed: { backgroundColor: '#FFD54F', borderRadius: 20, padding: 12, marginTop: 15, alignItems: 'center' },
-    scheduleButtonTextDetailed: { fontSize: 16, fontWeight: 'bold' }
+    timeSlotText: { fontSize: 12, fontWeight: 'bold' },
+    taskTopicDetail: { fontSize: 17, fontWeight: 'bold', marginBottom: 5 },
+    taskActivities: { fontSize: 14, fontStyle: 'italic' },
+    calendarLinkButton: { marginTop: 8, paddingVertical: 6 },
+    calendarLinkText: { fontSize: 14, textDecorationLine: 'underline' },
+    scheduleButtonDetailed: {
+        backgroundColor: '#FDD835',
+        padding: 15,
+        borderRadius: 25,
+        marginTop: 25,
+        alignItems: 'center',
+        elevation: 5,
+    },
+    scheduleButtonTextDetailed: { fontWeight: 'bold', fontSize: 16 },
 });
 
 export default PlanningScreen;
