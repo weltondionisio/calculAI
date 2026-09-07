@@ -64,6 +64,11 @@ Desenvolvido por Dr. Welton Dionisio.
 
 ---
 
-##Clique p/ assistir a demonstração em vídeo
+## Clique p/ assistir a demonstração em vídeo
 
-(https://img.youtube.com/vi/-fK71En1Bgk/hqdefault.jpg)](https://www.youtube.com/shorts/-fK71En1Bgk)
+<p align="center">
+  <h3>🎬 Clique para assistir à demonstração em vídeo do calculAI</h3>
+  <a href="https://www.youtube.com/shorts/-fK71En1Bgk">
+    <img src="https://img.youtube.com/vi/-fK71En1Bgk/maxresdefault.jpg" alt="calculAI - Demo do Protótipo" width="800px">
+  </a>
+</p>
